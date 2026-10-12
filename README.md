@@ -1,0 +1,2 @@
+# Prioriti
+Student Schedule App
