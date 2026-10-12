@@ -25,7 +25,10 @@ def connect_database() -> tuple[MongoClient, Database]:
             timeoutMS=5000,
         )
         client.admin.command("ping")
-        return client, client[database_name]
+        database = client[database_name]
+        database.tasks.create_index([("owner_id", 1), ("deadline", 1)])
+        database.commitments.create_index([("owner_id", 1), ("start", 1)])
+        return client, database
     except PyMongoError:
         if client is not None:
             client.close()

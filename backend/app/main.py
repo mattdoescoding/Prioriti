@@ -2,11 +2,13 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo.errors import PyMongoError
 from starlette.concurrency import run_in_threadpool
 
 from app.db import connect_database
+from app.routes import router
 
 
 @asynccontextmanager
@@ -45,3 +47,14 @@ def health(request: Request) -> dict[str, str]:
         ) from None
 
     return {"status": "ok", "database": "connected"}
+
+app.include_router(router)
+
+@app.exception_handler(PyMongoError)
+async def database_error_handler(
+    request: Request, error: PyMongoError
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Database unavailable. Please retry."},
+    )
