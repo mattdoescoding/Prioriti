@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Request
+from datetime import datetime, timezone
+from app.scheduler import ScheduleRequest, ScheduleResult, generate_schedule
 
 from app.models import (
     CommitmentCreate,
@@ -57,3 +59,11 @@ def list_commitments(request: Request) -> list[CommitmentRead]:
         CommitmentRead.model_validate(public_record(document))
         for document in documents
     ]
+
+@router.post("/schedule/generate", response_model=ScheduleResult)
+def create_schedule(body: ScheduleRequest, request: Request) -> ScheduleResult:
+    tasks = list_tasks(request)
+    commitments = list_commitments(request)
+    return generate_schedule(
+        tasks, commitments, body.week_start, now=datetime.now(timezone.utc)
+    )
