@@ -51,3 +51,4 @@ class CommitmentCreate(RecordInput):
 class CommitmentRead(CommitmentCreate):
     id: str
     owner_id: str
+    class_id: str | None = None
