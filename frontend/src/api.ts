@@ -35,7 +35,11 @@ function errorMessage(data: unknown, fallback: string): string {
   return fallback
 }
 
-async function request<T>(path: string, body?: unknown): Promise<T> {
+async function request<T>(
+  path: string,
+  body?: unknown,
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' = body === undefined ? 'GET' : 'POST',
+): Promise<T> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 10_000)
   let response: Response
@@ -43,7 +47,7 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
 
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
-      method: body === undefined ? 'GET' : 'POST',
+      method,
       headers: {
         Accept: 'application/json',
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
@@ -85,14 +89,33 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
 
 export const api = {
   getTasks: () => request<Task[]>('/tasks'),
+  
+  getClasses: () => request<ClassSeries[]>('/classes'),
 
-  createTask: (task: TaskInput) => request<Task>('/tasks', task),
+  getCalendar: (weekStart: string) =>
+    request<Commitment[]>(
+      `/calendar?week_start=${encodeURIComponent(weekStart)}`,
+    ),
 
   getCommitments: () => request<Commitment[]>('/commitments'),
+
+  createTask: (task: TaskInput) => request<Task>('/tasks', task),
 
   createCommitment: (commitment: CommitmentInput) =>
     request<Commitment>('/commitments', commitment),
 
   generateSchedule: (weekStart: string) =>
     request<ScheduleResult>('/schedule/generate', { week_start: weekStart }),
+
+  saveClass: (value: ClassInput, id?: string) =>
+    id
+      ? request<ClassSeries>(
+          `/classes/${encodeURIComponent(id)}`, value, 'PUT',
+        )
+      : request<ClassSeries>('/classes', value),
+
+  deleteClass: (id: string) =>
+    request<{ deleted: boolean }>(
+      `/classes/${encodeURIComponent(id)}`, undefined, 'DELETE',
+    ),
 }

@@ -26,6 +26,7 @@ export interface CommitmentInput {
 export interface Commitment extends CommitmentInput {
   id: string
   owner_id: string
+  class_id?: string | null
 }
 
 export interface ScheduledTask {
@@ -55,4 +56,19 @@ export interface ScheduleResult {
   scheduled: ScheduledTask[]
   unscheduled: UnscheduledTask[]
   commitments: Commitment[]
+}
+
+export interface ClassInput {
+  title: string
+  weekdays: number[]
+  start_time: string
+  end_time: string
+  start_date: string
+  end_date: string
+  skip_dates: string[]
+}
+
+export interface ClassSeries extends ClassInput {
+  id: string
+  owner_id: string
 }
