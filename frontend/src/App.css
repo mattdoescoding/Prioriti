@@ -100,6 +100,27 @@ button {
   font-weight: 600;
 }
 
+.page-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 28px 0 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #d8e2e9;
+}
+
+.page-nav a {
+  padding: 10px 16px;
+  border-radius: 8px;
+  color: #526572;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.page-nav a:hover { background: #e9eff4; color: #172b3a; }
+.page-nav a[aria-current="page"] { background: #126675; color: white; }
+.page-content { max-width: 760px; margin: 0 auto; }
+
 button:not(:disabled):hover { background: #0f5562; }
 .secondary:not(:disabled):hover { background: #cfe4e7; }
 input:focus, select:focus { border-color: #126675; }

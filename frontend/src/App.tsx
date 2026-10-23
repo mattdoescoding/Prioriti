@@ -5,6 +5,14 @@ import type { Commitment, ScheduleResult, Task } from './types'
 import { formatDateTime, localToUtc, todayInNewYork } from './time'
 import './App.css'
 
+type Page = 'calendar' | 'tasks' | 'classes'
+
+function readPage(): Page {
+  if (window.location.hash === '#tasks') return 'tasks'
+  if (window.location.hash === '#classes') return 'classes'
+  return 'calendar'
+}
+
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : 'Something went wrong.'
 }
@@ -16,6 +24,7 @@ function field(data: FormData, name: string): string {
 }
 
 export default function App() {
+  const [page, setPage] = useState<Page>(readPage)
   const [tasks, setTasks] = useState<Task[]>([])
   const [commitments, setCommitments] = useState<Commitment[]>([])
   const [schedule, setSchedule] = useState<ScheduleResult | null>(null)
@@ -25,6 +34,11 @@ export default function App() {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const inFlight = useRef(true)
+  useEffect(() => {
+    const syncPage = () => setPage(readPage())
+    window.addEventListener('hashchange', syncPage)
+    return () => window.removeEventListener('hashchange', syncPage)
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -172,6 +186,18 @@ export default function App() {
         </button>
       </header>
 
+      <nav className="page-nav" aria-label="Planner sections">
+        <a href="#calendar" aria-current={page === 'calendar' ? 'page' : undefined}>
+          Calendar
+        </a>
+        <a href="#tasks" aria-current={page === 'tasks' ? 'page' : undefined}>
+          Tasks
+        </a>
+        <a href="#classes" aria-current={page === 'classes' ? 'page' : undefined}>
+          Classes
+        </a>
+      </nav>
+
       <p className="notice">
         All dates and times use America/New_York. Tasks use 9AM–9PM availability and round up to 15-minute blocks.
       </p>
@@ -180,14 +206,14 @@ export default function App() {
       </div>
       {error && <p role="alert" className="error">{error}</p>}
 
-      <div className="columns">
-        <section className="panel">
+      <div className="page-content">
+        <section className="panel" hidden={page !== 'tasks'}>
           <h2>Add a task</h2>
           <form onSubmit={saveTask}>
             <fieldset disabled={pending || !loaded}>
               <label>Title<input name="title" required maxLength={200} /></label>
               <label>Deadline<input name="deadline" type="datetime-local" required /></label>
-              <div className="columns">
+              <div className="page-content">
                 <label>Estimated minutes
                   <input name="minutes" type="number" min="1" step="1" required />
                 </label>
@@ -213,7 +239,7 @@ export default function App() {
           </form>
         </section>
 
-        <section className="panel">
+        <section className="panel" hidden={page !== 'tasks'}>
           <h2>Add a commitment</h2>
           <p>Enter a one-off class, meeting, or other fixed block of time.</p>
           <form onSubmit={saveCommitment}>
@@ -227,8 +253,8 @@ export default function App() {
         </section>
       </div>
 
-      <div className="columns">
-        <section className="panel">
+      <div className="page-content">
+        <section className="panel" hidden={page !== 'tasks'}>
           <h2>Saved tasks</h2>
           {!loaded ? <p>Load saved records to continue.</p> : tasks.length === 0 ? <p>No tasks yet.</p> : (
             <ul className="records">
@@ -242,7 +268,7 @@ export default function App() {
             </ul>
           )}
         </section>
-        <section className="panel">
+        <section className="panel" hidden={page !== 'tasks'}>
           <h2>Saved commitments</h2>
           {!loaded ? <p>Load saved records to continue.</p> : commitments.length === 0 ? <p>No commitments yet.</p> : (
             <ul className="records">
@@ -257,7 +283,7 @@ export default function App() {
         </section>
       </div>
 
-      <section className="panel">
+      <section className="panel" hidden={page !== 'tasks'}>
         <h2>Plan seven days</h2>
         <form onSubmit={generate}>
           <fieldset disabled={pending || !loaded}>
