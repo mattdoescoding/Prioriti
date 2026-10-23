@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { api } from './api'
-import type { Commitment, ScheduleResult, Task } from './types'
 import { formatDateTime, localToUtc, todayInNewYork } from './time'
+import type { ClassInput, ClassSeries, Commitment, ScheduleResult, Task, } from './types'
+import CalendarPage from './CalendarPage'
+import ClassesPage from './ClassesPage'
 import './App.css'
 
 type Page = 'calendar' | 'tasks' | 'classes'
@@ -33,6 +35,8 @@ export default function App() {
   const [pending, setPending] = useState(true)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [classes, setClasses] = useState<ClassSeries[]>([])
+  const [calendarVersion, setCalendarVersion] = useState(0)
   const inFlight = useRef(true)
   useEffect(() => {
     const syncPage = () => setPage(readPage())
@@ -43,12 +47,17 @@ export default function App() {
   useEffect(() => {
     let active = true
 
-    Promise.all([api.getTasks(), api.getCommitments()])
-      .then(([savedTasks, savedCommitments]) => {
+    Promise.all([
+        api.getTasks(),
+        api.getCommitments(),
+        api.getClasses(),
+      ])
+      .then(([savedTasks, savedCommitments, savedClasses]) => {
         if (!active) return
-        setTasks(savedTasks)
-        setCommitments(savedCommitments)
-        setLoaded(true)
+          setTasks(savedTasks)
+          setCommitments(savedCommitments)
+          setClasses(savedClasses)
+          setLoaded(true)
       })
       .catch((reason: unknown) => {
         if (active) setError(errorText(reason))
@@ -59,12 +68,12 @@ export default function App() {
           setPending(false)
         }
       })
-
     return () => { active = false }
   }, [])
 
   async function perform(action: () => Promise<void>) {
-    if (inFlight.current) return
+    if (inFlight.current) return false
+
     inFlight.current = true
     setPending(true)
     setError('')
@@ -73,8 +82,11 @@ export default function App() {
 
     try {
       await action()
+      setCalendarVersion((current) => current + 1)
+      return true
     } catch (reason) {
       setError(errorText(reason))
+      return false
     } finally {
       inFlight.current = false
       setPending(false)
@@ -84,13 +96,20 @@ export default function App() {
   function reload() {
     void perform(async () => {
       setLoaded(false)
-      const [savedTasks, savedCommitments] = await Promise.all([
-        api.getTasks(), api.getCommitments(),
-      ])
+
+      const [savedTasks, savedCommitments, savedClasses] =
+        await Promise.all([
+          api.getTasks(),
+          api.getCommitments(),
+          api.getClasses(),
+        ])
+
       setTasks(savedTasks)
       setCommitments(savedCommitments)
+      setClasses(savedClasses)
       setLoaded(true)
-      setMessage('Saved records refreshed. Generate a new schedule when ready.')
+
+      setMessage('Saved records refreshed. Generate a new schedule when ready.',)
     })
   }
 
@@ -150,6 +169,33 @@ export default function App() {
     })
   }
 
+  function changeWeek(value: string) {
+    if (!value || value < '1900-01-01' || value > '9999-12-24') return
+      setWeekStart(value)
+      setSchedule(null)
+      setMessage('')
+  }
+
+  function saveClass(value: ClassInput, id?: string) {
+    return perform(async () => {
+      const saved = await api.saveClass(value, id)
+
+      setClasses((current) => id
+        ? current.map((item) => item.id === id ? saved : item)
+        : [...current, saved])
+
+      setMessage('Class saved. Generate again to update planned tasks.')
+    })
+  }
+
+  function deleteClass(id: string) {
+    return perform(async () => {
+      await api.deleteClass(id)
+      setClasses((current) => current.filter((item) => item.id !== id))
+      setMessage('Class deleted. Generate again to update planned tasks.')
+    })
+  }
+
   function generate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     void perform(async () => {
@@ -163,7 +209,7 @@ export default function App() {
 
   const agenda = schedule ? [
     ...schedule.commitments.map((item) => ({
-      key: `commitment-${item.id}`, kind: 'Commitment',
+      key: `commitment-${item.id}`, kind: item.class_id ? 'Class' : 'Commitment',
       title: item.title, start: item.start, end: item.end, detail: 'Fixed time',
     })),
     ...schedule.scheduled.map((item) => ({
@@ -198,22 +244,37 @@ export default function App() {
         </a>
       </nav>
 
-      <p className="notice">
-        All dates and times use America/New_York. Tasks use 9AM–9PM availability and round up to 15-minute blocks.
-      </p>
       <div role="status" aria-live="polite">
         {pending ? <p className="notice">Working…</p> : message && <p className="success">{message}</p>}
       </div>
       {error && <p role="alert" className="error">{error}</p>}
+      {page === 'calendar' && (
+        <CalendarPage
+          key={`${weekStart}:${calendarVersion}`}
+          weekStart={weekStart}
+          schedule={schedule}
+          disabled={pending || !loaded}
+          onWeekChange={changeWeek}
+          onGenerate={generate}
+        />
+      )}
 
-      <div className="page-content">
+      {page === 'classes' && (
+        <ClassesPage
+          classes={classes}
+          disabled={pending || !loaded}
+          onSave={saveClass}
+          onDelete={deleteClass}
+        />
+      )}
+      <div className="columns">
         <section className="panel" hidden={page !== 'tasks'}>
           <h2>Add a task</h2>
           <form onSubmit={saveTask}>
             <fieldset disabled={pending || !loaded}>
               <label>Title<input name="title" required maxLength={200} /></label>
               <label>Deadline<input name="deadline" type="datetime-local" required /></label>
-              <div className="page-content">
+              <div className="columns">
                 <label>Estimated minutes
                   <input name="minutes" type="number" min="1" step="1" required />
                 </label>
@@ -253,7 +314,7 @@ export default function App() {
         </section>
       </div>
 
-      <div className="page-content">
+      <div className="columns">
         <section className="panel" hidden={page !== 'tasks'}>
           <h2>Saved tasks</h2>
           {!loaded ? <p>Load saved records to continue.</p> : tasks.length === 0 ? <p>No tasks yet.</p> : (
@@ -289,12 +350,12 @@ export default function App() {
           <fieldset disabled={pending || !loaded}>
             <label>First day
               <input
-                type="date" required value={weekStart}
-                onChange={(event) => {
-                  setWeekStart(event.target.value)
-                  setSchedule(null)
-                  setMessage('')
-                }}
+                type="date"
+                required
+                min="1900-01-01"
+                max="9999-12-24"
+                value={weekStart}
+                onChange={(event) => changeWeek(event.target.value)}
               />
             </label>
             <button type="submit">Generate schedule</button>
