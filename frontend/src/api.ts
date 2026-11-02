@@ -1,4 +1,6 @@
 import type {
+  ClassInput,
+  ClassSeries,
   Commitment,
   CommitmentInput,
   ScheduleResult,
