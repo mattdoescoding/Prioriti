@@ -6,6 +6,7 @@ export type TaskStatus = 'todo' | 'completed'
 export interface TaskInput {
   title: string
   deadline: string
+  not_before?: string | null
   priority: Priority
   category: string
   estimated_minutes: number
@@ -46,6 +47,7 @@ export interface UnscheduledTask {
     | 'deadline_passed'
     | 'duration_exceeds_day'
     | 'no_slot'
+    | 'not_available'
   reason: string
 }
 

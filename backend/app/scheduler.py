@@ -28,7 +28,11 @@ class UnscheduledTask(BaseModel):
     task_id: str
     title: str
     code: Literal[
-        "window_elapsed", "deadline_passed", "duration_exceeds_day", "no_slot"
+        "window_elapsed",
+        "deadline_passed",
+        "duration_exceeds_day",
+        "no_slot",
+        "not_available",
     ]
     reason: str
 
@@ -89,6 +93,7 @@ def generate_schedule(
     )
 
     for task in ordered_tasks:
+        task_start = max(effective_start, task.not_before or effective_start)
         minutes = ((task.estimated_minutes + 14) // 15) * 15
         if effective_start >= window_end:
             code = "window_elapsed"
@@ -96,6 +101,9 @@ def generate_schedule(
         elif task.deadline <= effective_start:
             code = "deadline_passed"
             reason = "The deadline is at or before the planning start."
+        elif task_start >= window_end:
+            code = "not_available"
+            reason = "This task becomes available after this seven-day window."
         elif minutes > 720:
             code = "duration_exceeds_day"
             reason = (
@@ -114,7 +122,7 @@ def generate_schedule(
                         candidate < busy_end and end > busy_start
                         for busy_start, busy_end in busy
                     )
-                    if candidate >= effective_start and not overlaps:
+                    if candidate >= task_start and not overlaps:
                         result.scheduled.append(ScheduledTask(
                             task_id=task.id,
                             title=task.title,
@@ -132,9 +140,7 @@ def generate_schedule(
             if placed:
                 continue
             code = "no_slot"
-            reason = (
-                f"No continuous {minutes}-minute block remains before the deadline in this weekly window, within 9:00AM to 9:00PM New York time, after commitments and earlier placements."
-            )
+            reason = (f"No continuous {minutes}-minute block fits between the available-from time and deadline in this seven-day window, within 9:00 AM to 9:00 PM New York time, after fixed events and earlier task placements.")
 
         result.unscheduled.append(UnscheduledTask(
             task_id=task.id, title=task.title, code=code, reason=reason,

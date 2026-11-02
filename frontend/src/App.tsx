@@ -122,6 +122,7 @@ export default function App() {
       const minutes = Number(field(data, 'minutes'))
       const priority = Number(field(data, 'priority'))
       const status = field(data, 'status')
+      const availableFrom = String(data.get('not_before') ?? '').trim()
 
       if (!Number.isSafeInteger(minutes) || minutes <= 0) {
         throw new Error('Estimated minutes must be a positive whole number.')
@@ -136,6 +137,7 @@ export default function App() {
       const saved = await api.createTask({
         title: field(data, 'title'),
         deadline: localToUtc(field(data, 'deadline')),
+        not_before: availableFrom ? localToUtc(availableFrom) : null,
         priority,
         category: field(data, 'category'),
         estimated_minutes: minutes,
@@ -273,6 +275,16 @@ export default function App() {
           <form onSubmit={saveTask}>
             <fieldset disabled={pending || !loaded}>
               <label>Title<input name="title" required maxLength={200} /></label>
+              <label>Available from (optional)
+                <input
+                  name="not_before"
+                  type="datetime-local"
+                  aria-describedby="availability-help"
+                />
+              </label>
+              <p id="availability-help" className="hint">
+                Leave blank to let Prioriti start as soon as time is available. To keep work on a particular day, set both dates to that day.
+              </p>
               <label>Deadline<input name="deadline" type="datetime-local" required /></label>
               <div className="columns">
                 <label>Estimated minutes
@@ -324,6 +336,11 @@ export default function App() {
                   <strong>{task.title}</strong>
                   <p>{task.estimated_minutes} min · Priority {task.priority} · {task.category} · {task.status}</p>
                   <small>Due {formatDateTime(task.deadline)}</small>
+                  {task.not_before && (
+                    <p className="hint">
+                      Available from {formatDateTime(task.not_before)}
+                    </p>
+                  )}
                 </li>
               ))}
             </ul>

@@ -18,15 +18,26 @@ class RecordInput(BaseModel):
 class TaskCreate(RecordInput):
     title: str = Field(min_length=1, max_length=200)
     deadline: AwareDatetime
+    not_before: AwareDatetime | None = None
     priority: int = Field(default=2, strict=True, ge=1, le=3)
     category: str = Field(min_length=1, max_length=80)
     estimated_minutes: int = Field(strict=True, gt=0)
     status: Literal["todo", "completed"] = "todo"
 
-    @field_validator("deadline")
+    @field_validator("deadline", "not_before")
     @classmethod
-    def normalize_deadline(cls, value: datetime) -> datetime:
-        return value.astimezone(timezone.utc)
+    def normalize_task_time(
+        cls, value: datetime | None,
+    ) -> datetime | None:
+        return value.astimezone(timezone.utc) if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_task_window(self) -> Self:
+        if self.not_before is not None and self.not_before >= self.deadline:
+            raise ValueError(
+                "Available-from time must be before the deadline."
+            )
+        return self
 
 
 class TaskRead(TaskCreate):
