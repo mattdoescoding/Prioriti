@@ -189,9 +189,7 @@ The current interface supports creating and listing records. Editing, deleting, 
 
 Pending implementations:
 - Authentication and ownership enforcement
-- Recurring commitments and availability configuration
-- Completion and duration logging
-- Travel buffers, pinned blocks, and scheduling optimization
+- Semantic embeddings for stronger similarity matching when enough history is available.
+- Suggested categories for tasks
+- Travel buffers and task splitting
 - Automated Canvas calendar imports and authorized course/assignment API integration (needs Rutgers confirmation)
-- Duration prediction and caching
-- Public deployment
