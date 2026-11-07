@@ -9,6 +9,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.db import connect_database
 from app.routes import router
+from app.canvas import router as canvas_router
 
 
 @asynccontextmanager
@@ -31,7 +32,7 @@ app.add_middleware(
         os.getenv("FRONTEND_ORIGIN", "http://127.0.0.1:5173")
     ],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Content-Type"],
 )
 
@@ -49,6 +50,7 @@ def health(request: Request) -> dict[str, str]:
     return {"status": "ok", "database": "connected"}
 
 app.include_router(router)
+app.include_router(canvas_router)
 
 @app.exception_handler(PyMongoError)
 async def database_error_handler(

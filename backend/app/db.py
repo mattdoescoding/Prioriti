@@ -7,6 +7,7 @@ from pymongo.database import Database
 from pymongo.errors import PyMongoError
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+OWNER_ID = "local-development"
 
 
 def connect_database() -> tuple[MongoClient, Database]:
@@ -27,7 +28,16 @@ def connect_database() -> tuple[MongoClient, Database]:
         client.admin.command("ping")
         database = client[database_name]
         database.tasks.create_index([("owner_id", 1), ("deadline", 1)])
-        database.commitments.create_index([("owner_id", 1), ("start", 1)])
+        database.events.create_index([("owner_id", 1), ("start", 1)])
+        database.classes.create_index([("owner_id", 1), ("title", 1)])
+        for collection in (database.tasks, database.events):
+            collection.create_index(
+                [("owner_id", 1), ("source_id", 1)], unique=True,
+                partialFilterExpression={"source_id": {"$type": "string"}},
+            )
+        database.schedule_blocks.create_index([("owner_id", 1), ("start", 1)])
+        database.feedback.create_index([("owner_id", 1)])
+        migrate_events(database)
         return client, database
     except PyMongoError:
         if client is not None:
@@ -35,3 +45,12 @@ def connect_database() -> tuple[MongoClient, Database]:
         raise RuntimeError(
             "Cannot connect to MongoDB. Reference backend/.env and Docker Desktop."
         ) from None
+
+
+def migrate_events(database):
+    for document in database.commitments.find({}):
+        marker = f"event:{document['_id']}"
+        if database.migrations.find_one({"_id": marker}):
+            continue
+        database.events.update_one({"_id": document["_id"]}, {"$setOnInsert": document}, upsert=True)
+        database.migrations.update_one({"_id": marker}, {"$setOnInsert": {"done": True}}, upsert=True)

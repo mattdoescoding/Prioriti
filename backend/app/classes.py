@@ -2,7 +2,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Annotated, Self
 from zoneinfo import ZoneInfo
 from pydantic import Field, model_validator
-from app.models import CommitmentRead, RecordInput
+from app.models import CalendarEvent, RecordInput
 
 NY = ZoneInfo("America/New_York")
 UTC = timezone.utc
@@ -78,7 +78,7 @@ class ClassRead(ClassInput):
 
 def expand_classes(
     classes: list[ClassRead], week_start: date,
-) -> list[CommitmentRead]:
+) -> list[CalendarEvent]:
     meetings = []
 
     for item in classes:
@@ -90,7 +90,7 @@ def expand_classes(
                 and day.weekday() in item.weekdays
                 and day not in item.skip_dates
             ):
-                meetings.append(CommitmentRead(
+                meetings.append(CalendarEvent(
                     id=f"{item.id}:{day.isoformat()}",
                     class_id=item.id,
                     owner_id=item.owner_id,

@@ -1,11 +1,20 @@
 import type {
+  Availability,
+  CanvasImportResult,
+  CanvasPreview,
+  CanvasRequest,
   ClassInput,
   ClassSeries,
-  Commitment,
-  CommitmentInput,
+  CalendarEvent,
+  LearningStatus,
+  Placement,
+  ScheduledTask,
+  TaskGroup,
+  TaskGroupInput,
   ScheduleResult,
   Task,
   TaskInput,
+  TaskStatus,
 } from './types'
 
 const API_BASE_URL = (
@@ -40,7 +49,7 @@ function errorMessage(data: unknown, fallback: string): string {
 async function request<T>(
   path: string,
   body?: unknown,
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE' = body === undefined ? 'GET' : 'POST',
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' = body === undefined ? 'GET' : 'POST',
 ): Promise<T> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 10_000)
@@ -95,16 +104,43 @@ export const api = {
   getClasses: () => request<ClassSeries[]>('/classes'),
 
   getCalendar: (weekStart: string) =>
-    request<Commitment[]>(
+    request<CalendarEvent[]>(
       `/calendar?week_start=${encodeURIComponent(weekStart)}`,
     ),
 
-  getCommitments: () => request<Commitment[]>('/commitments'),
+  saveTask: (task: TaskInput, id?: string) =>
+    request<Task>(id ? `/tasks/${encodeURIComponent(id)}` : '/tasks', task, id ? 'PUT' : 'POST'),
 
-  createTask: (task: TaskInput) => request<Task>('/tasks', task),
+  setTaskStatus: (id: string, status: TaskStatus) =>
+    request<Task>(`/tasks/${encodeURIComponent(id)}`, { status }, 'PATCH'),
 
-  createCommitment: (commitment: CommitmentInput) =>
-    request<Commitment>('/commitments', commitment),
+  deleteTask: (id: string) =>
+    request<{ deleted: boolean }>(`/tasks/${encodeURIComponent(id)}`, undefined, 'DELETE'),
+
+  deleteAllTasks: () => request<{ deleted_tasks: number; deleted_sessions: number }>('/tasks', undefined, 'DELETE'),
+
+  getGroups: () => request<TaskGroup[]>('/groups'),
+  saveGroup: (value: TaskGroupInput, id?: string) => request<TaskGroup>(id ? `/groups/${id}` : '/groups', value, id ? 'PUT' : 'POST'),
+  deleteGroup: (id: string) => request<{ deleted: boolean }>(`/groups/${id}`, undefined, 'DELETE'),
+  getSchedule: (week: string) => request<ScheduleResult>(`/schedule?week_start=${week}`),
+  createBlock: (task_id: string, value: Placement, session_key?: string) => request<ScheduledTask>('/schedule/blocks', { task_id, ...value, ...(session_key ? { session_key } : {}) }),
+  moveBlock: (id: string, value: Placement) => request<ScheduledTask>(`/schedule/blocks/${encodeURIComponent(id)}`, value, 'PUT'),
+  unlockBlock: (id: string) => request<ScheduledTask>(`/schedule/blocks/${encodeURIComponent(id)}`, { status: 'planned', locked: false }, 'PATCH'),
+  completeBlock: (id: string, status: 'planned' | 'completed', actual_minutes?: number) => request<ScheduledTask>(`/schedule/blocks/${encodeURIComponent(id)}`, { status, ...(actual_minutes ? { actual_minutes } : {}) }, 'PATCH'),
+  acceptSchedule: (week_start: string) => request<{ accepted: number }>('/schedule/accept', { week_start }),
+  getLearning: () => request<LearningStatus>('/learning/status'),
+  trainLearning: () => request<LearningStatus>('/learning/train', {}),
+  clearLearning: () => request<LearningStatus>('/learning', undefined, 'DELETE'),
+  saveEvent: (id: string, value: { title: string; start: string; end: string }) => request<CalendarEvent>(`/events/${encodeURIComponent(id)}`, value, 'PUT'),
+  deleteEvent: (id: string) => request<{ deleted: boolean }>(`/events/${encodeURIComponent(id)}`, undefined, 'DELETE'),
+
+  getAvailability: () => request<Availability>('/availability'),
+
+  saveAvailability: (value: Availability) => request<Availability>('/availability', value, 'PUT'),
+
+  previewCanvas: (value: CanvasRequest) => request<CanvasPreview>('/canvas/preview', value),
+
+  importCanvas: (value: CanvasRequest) => request<CanvasImportResult>('/canvas/import', value),
 
   generateSchedule: (weekStart: string) =>
     request<ScheduleResult>('/schedule/generate', { week_start: weekStart }),
