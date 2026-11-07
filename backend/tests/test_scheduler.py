@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from app.models import CommitmentRead, TaskRead
+from app.models import CalendarEvent, TaskRead
 from app.scheduler import generate_schedule
 
 NY = ZoneInfo("America/New_York")
@@ -20,14 +20,14 @@ def task(**changes):
     return TaskRead(**values)
 
 
-def test_avoids_commitment_and_other_tasks():
-    commitment = CommitmentRead(
+def test_avoids_event_and_other_tasks():
+    event = CalendarEvent(
         id="class", owner_id="local-development", title="Class",
         start=datetime(2026, 10, 22, 9, tzinfo=NY),
         end=datetime(2026, 10, 22, 10, 7, tzinfo=NY),
     )
     result = generate_schedule(
-        [task(id="a"), task(id="b")], [commitment], WEEK, now=NOW
+        [task(id="a"), task(id="b")], [event], WEEK, now=NOW
     )
     first, second = result.scheduled
     assert first.start == datetime(2026, 10, 22, 10, 15, tzinfo=NY)
@@ -39,7 +39,7 @@ def test_avoids_commitment_and_other_tasks():
 
 def test_deadline_prevents_late_scheduling():
     result = generate_schedule(
-        [task(deadline=datetime(2026, 10, 22, 9, 30, tzinfo=NY))],
+        [task(deadline=datetime(2026, 10, 22, 9, 15, tzinfo=NY))],
         [], WEEK, now=NOW,
     )
     assert result.scheduled == []
@@ -111,6 +111,7 @@ def test_deadline_priority_and_id_give_deterministic_order():
 
 
 def test_availability_stays_local_across_daylight_saving_change():
+    from app.availability import Availability
     tasks = [
         task(
             id=str(i), estimated_minutes=720,
@@ -121,6 +122,7 @@ def test_availability_stays_local_across_daylight_saving_change():
     result = generate_schedule(
         tasks, [], date(2026, 10, 31),
         now=datetime(2026, 10, 30, 8, tzinfo=NY),
+        availability=Availability(windows=[dict(weekday=i, start_time="09:00", end_time="21:00") for i in range(7)]),
     )
     assert [block.start.hour for block in result.scheduled] == [13, 14, 14]
     assert all(

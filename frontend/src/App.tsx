@@ -1,417 +1,148 @@
-import { useEffect, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { DateTime } from 'luxon'
+import { CalendarDays, Check, ChevronRight, Folder, GraduationCap, ListTodo, Menu, Plus, RefreshCw, SlidersHorizontal, Sparkles, X } from 'lucide-react'
 import { api } from './api'
-import { formatDateTime, localToUtc, todayInNewYork } from './time'
-import type { ClassInput, ClassSeries, Commitment, ScheduleResult, Task, } from './types'
+import { MiniCalendar } from './DatePicker'
+import { localDateTime, today, weekOf } from './time'
+import type { Availability, CalendarEvent, CanvasRequest, ClassInput, ClassSeries, LearningStatus, Placement, ScheduledTask, ScheduleResult, Task, TaskGroup, TaskGroupInput, TaskInput, TaskStatus } from './types'
 import CalendarPage from './CalendarPage'
 import ClassesPage from './ClassesPage'
+import TasksPage from './TasksPage'
+import AvailabilityPage from './AvailabilityPage'
+import CanvasImport from './CanvasImport'
+import TaskPanel from './TaskPanel'
+import GroupsPage from './GroupsPage'
+import EventPanel from './EventPanel'
 import './App.css'
 
-type Page = 'calendar' | 'tasks' | 'classes'
-
-function readPage(): Page {
-  if (window.location.hash === '#tasks') return 'tasks'
-  if (window.location.hash === '#classes') return 'classes'
-  return 'calendar'
-}
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : 'Something went wrong.'
-}
-
-function field(data: FormData, name: string): string {
-  const value = String(data.get(name) ?? '').trim()
-  if (!value) throw new Error(`Please enter ${name}.`)
-  return value
-}
+type Page = 'calendar' | 'tasks' | 'groups' | 'classes' | 'availability'
+const NAV = [{ id: 'calendar', title: 'Calendar', icon: CalendarDays }, { id: 'tasks', title: 'Tasks', icon: ListTodo }, { id: 'classes', title: 'Classes & Canvas', icon: GraduationCap }, { id: 'availability', title: 'Availability', icon: SlidersHorizontal }] as const
+const readPage = (): Page => ['tasks', 'groups', 'classes', 'availability'].find((item) => window.location.hash === `#${item}`) as Page ?? 'calendar'
+const readRecords = (week: string) => Promise.all([api.getTasks(), api.getGroups(), api.getClasses(), api.getAvailability(), api.getSchedule(week), api.getLearning()])
+const errorText = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Try again.'
+interface Editor { id: string | null; blockId?: string; block?: ScheduledTask; placement?: Placement }
 
 export default function App() {
   const [page, setPage] = useState<Page>(readPage)
   const [tasks, setTasks] = useState<Task[]>([])
-  const [commitments, setCommitments] = useState<Commitment[]>([])
+  const [groups, setGroups] = useState<TaskGroup[]>([])
+  const [classes, setClasses] = useState<ClassSeries[]>([])
+  const [availability, setAvailability] = useState<Availability>({ windows: [] })
   const [schedule, setSchedule] = useState<ScheduleResult | null>(null)
-  const [weekStart, setWeekStart] = useState(todayInNewYork)
+  const [learning, setLearning] = useState<LearningStatus>({ samples: 0, trained_at: null, method: '' })
+  const [weekStart, setWeekStart] = useState(() => weekOf(today()))
+  const [groupId, setGroupId] = useState<string | null>(null)
+  const [editor, setEditor] = useState<Editor | null>(null)
+  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [pending, setPending] = useState(true)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
-  const [classes, setClasses] = useState<ClassSeries[]>([])
-  const [calendarVersion, setCalendarVersion] = useState(0)
+  const [version, setVersion] = useState(0)
   const inFlight = useRef(true)
-  useEffect(() => {
-    const syncPage = () => setPage(readPage())
-    window.addEventListener('hashchange', syncPage)
-    return () => window.removeEventListener('hashchange', syncPage)
+  const applyRecords = useCallback(([savedTasks, savedGroups, savedClasses, savedAvailability, savedSchedule, savedLearning]: Awaited<ReturnType<typeof readRecords>>) => {
+    setTasks(savedTasks); setGroups(savedGroups); setClasses(savedClasses); setAvailability(savedAvailability); setSchedule(savedSchedule); setLearning(savedLearning); setLoaded(true)
   }, [])
 
+  useEffect(() => {
+    const navigate = () => { setPage(readPage()); setSidebarOpen(false) }
+    window.addEventListener('hashchange', navigate)
+    return () => window.removeEventListener('hashchange', navigate)
+  }, [])
   useEffect(() => {
     let active = true
-
-    Promise.all([
-        api.getTasks(),
-        api.getCommitments(),
-        api.getClasses(),
-      ])
-      .then(([savedTasks, savedCommitments, savedClasses]) => {
-        if (!active) return
-          setTasks(savedTasks)
-          setCommitments(savedCommitments)
-          setClasses(savedClasses)
-          setLoaded(true)
-      })
-      .catch((reason: unknown) => {
-        if (active) setError(errorText(reason))
-      })
-      .finally(() => {
-        if (active) {
-          inFlight.current = false
-          setPending(false)
-        }
-      })
+    readRecords(weekStart).then((records) => { if (active) applyRecords(records) }).catch((reason: unknown) => { if (active) setError(errorText(reason)) }).finally(() => { if (active) { inFlight.current = false; setPending(false) } })
     return () => { active = false }
-  }, [])
+  }, [weekStart, applyRecords])
+  useEffect(() => {
+    if (!message) return
+    const timeout = window.setTimeout(() => setMessage(''), 4500)
+    return () => window.clearTimeout(timeout)
+  }, [message])
 
-  async function perform(action: () => Promise<void>) {
+  async function perform(action: () => Promise<unknown>, success: string) {
     if (inFlight.current) return false
-
-    inFlight.current = true
-    setPending(true)
-    setError('')
-    setMessage('')
-    setSchedule(null)
-
+    inFlight.current = true; setPending(true); setError(''); setMessage('')
     try {
-      await action()
-      setCalendarVersion((current) => current + 1)
-      return true
+      await action(); applyRecords(await readRecords(weekStart)); setVersion((value) => value + 1); setMessage(success); return true
     } catch (reason) {
       setError(errorText(reason))
+      try { applyRecords(await readRecords(weekStart)) } catch { /* Keep the original error visible. */ }
       return false
-    } finally {
-      inFlight.current = false
-      setPending(false)
-    }
+    } finally { inFlight.current = false; setPending(false) }
   }
+  const createTask = (placement?: Placement) => { setEditor({ id: null, placement }); setSidebarOpen(false) }
+  const openTask = (task: Task, block?: ScheduledTask) => setEditor({ id: task.id, blockId: block?.id, block })
+  const disabled = pending || !loaded
+  const editTask = editor?.id ? tasks.find((task) => task.id === editor.id) : null
+  const editBlock = editor?.blockId ? schedule?.scheduled.find((block) => block.id === editor.blockId) ?? editor.block : undefined
 
-  function reload() {
-    void perform(async () => {
-      setLoaded(false)
-
-      const [savedTasks, savedCommitments, savedClasses] =
-        await Promise.all([
-          api.getTasks(),
-          api.getCommitments(),
-          api.getClasses(),
-        ])
-
-      setTasks(savedTasks)
-      setCommitments(savedCommitments)
-      setClasses(savedClasses)
-      setLoaded(true)
-
-      setMessage('Saved records refreshed. Generate a new schedule when ready.',)
-    })
-  }
-
-  function saveTask(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const form = event.currentTarget
-
-    void perform(async () => {
-      const data = new FormData(form)
-      const minutes = Number(field(data, 'minutes'))
-      const priority = Number(field(data, 'priority'))
-      const status = field(data, 'status')
-      const availableFrom = String(data.get('not_before') ?? '').trim()
-
-      if (!Number.isSafeInteger(minutes) || minutes <= 0) {
-        throw new Error('Estimated minutes must be a positive whole number.')
+  async function saveTask(value: TaskInput, id?: string, placement?: Placement, blockId?: string) {
+    let saved: Task | undefined
+    const original = schedule?.scheduled.find((block) => block.id === blockId) ?? (editor?.blockId === blockId ? editor?.block : undefined)
+    const success = await perform(async () => {
+      saved = await api.saveTask(value, id)
+      if (placement || blockId) {
+        const current = await api.getSchedule(weekStart)
+        const block = blockId ? current.scheduled.find((item) => item.id === blockId) : current.scheduled.find((item) => item.task_id === saved!.id && item.status === 'planned' && (!value.repeat_days.length || !placement || localDateTime(item.start).toISODate() === localDateTime(placement.start).toISODate()))
+        if (placement) {
+          if (block) {
+            if (Date.parse(block.start) !== Date.parse(placement.start) || Date.parse(block.end) !== Date.parse(placement.end) || !block.locked) await api.moveBlock(block.id, placement)
+          } else await api.createBlock(saved.id, placement, original?.session_key)
+        } else if (block?.locked && block.status === 'planned') await api.unlockBlock(block.id)
       }
-      if (priority !== 1 && priority !== 2 && priority !== 3) {
-        throw new Error('Choose a valid priority.')
-      }
-      if (status !== 'todo' && status !== 'completed') {
-        throw new Error('Choose a valid status.')
-      }
-
-      const saved = await api.createTask({
-        title: field(data, 'title'),
-        deadline: localToUtc(field(data, 'deadline')),
-        not_before: availableFrom ? localToUtc(availableFrom) : null,
-        priority,
-        category: field(data, 'category'),
-        estimated_minutes: minutes,
-        status,
-      })
-
-      setTasks((current) => [...current, saved])
-      form.reset()
-      setMessage('Task saved. Generate a new schedule to include your changes.')
-    })
+    }, 'Task saved. Your calendar is up to date.')
+    if (!success && saved && !id) setEditor({ id: saved.id, placement })
+    return success
   }
-
-  function saveCommitment(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const form = event.currentTarget
-
-    void perform(async () => {
-      const data = new FormData(form)
-      const start = localToUtc(field(data, 'start'))
-      const end = localToUtc(field(data, 'end'))
-      if (Date.parse(end) <= Date.parse(start)) {
-        throw new Error('The commitment must end after it starts.')
-      }
-
-      const saved = await api.createCommitment({
-        title: field(data, 'title'), start, end,
-      })
-      setCommitments((current) => [...current, saved])
-      form.reset()
-      setMessage('Commitment saved. Generate a new schedule to include your changes.')
-    })
+  const statusTask = (id: string, status: TaskStatus) => perform(() => api.setTaskStatus(id, status), status === 'completed' ? 'Task completed. Nicely done.' : 'Task reopened.')
+  const deleteTask = (id: string) => perform(() => api.deleteTask(id), 'Task deleted.')
+  const deleteAllTasks = () => perform(async () => { await api.deleteAllTasks(); setEditor(null) }, 'All tasks and scheduling progress deleted.')
+  const clearLearning = () => perform(() => api.clearLearning(), 'Learned history cleared. Future plans start fresh.')
+  const saveGroup = (value: TaskGroupInput, id?: string) => perform(() => api.saveGroup(value, id), 'Group saved.')
+  const deleteGroup = (id: string) => perform(async () => { await api.deleteGroup(id); if (groupId === id) setGroupId(null) }, 'Group removed. Its tasks are still here.')
+  const saveClass = (value: ClassInput, id?: string) => perform(() => api.saveClass(value, id), 'Class saved.')
+  const deleteClass = (id: string) => perform(() => api.deleteClass(id), 'Class removed.')
+  const saveAvailability = (value: Availability) => perform(() => api.saveAvailability(value), 'Availability saved.')
+  const importCanvas = (value: CanvasRequest) => perform(async () => { const result = await api.importCanvas(value); setMessage(`Imported ${result.imported.tasks} tasks and ${result.imported.events} events.`) }, 'Your Canvas calendar has been imported.')
+  const completeBlock = (block: ScheduledTask, minutes?: number) => {
+    if (!schedule?.scheduled.some((item) => item.id === block.id)) { setError('Save this session’s placement before marking it complete.'); return Promise.resolve(false) }
+    return perform(() => api.completeBlock(block.id, block.status === 'completed' ? 'planned' : 'completed', minutes), block.status === 'completed' ? 'Session reopened.' : 'Session completed.')
   }
-
-  function changeWeek(value: string) {
-    if (!value || value < '1900-01-01' || value > '9999-12-24') return
-      setWeekStart(value)
-      setSchedule(null)
-      setMessage('')
+  const changeWeek = (date: string) => {
+    const week = weekOf(date)
+    if (week === weekStart || pending) return
+    inFlight.current = true; setPending(true); setSchedule(null); setWeekStart(week); setMessage('')
   }
+  const saveEvent = (id: string, value: { title: string; start: string; end: string }) => perform(() => api.saveEvent(id, value), 'Event updated.')
+  const deleteEvent = (id: string) => perform(() => api.deleteEvent(id), 'Event removed.')
+  const closeEvent = useCallback(() => setSelectedEvent(null), [])
+  const currentLabel = page === 'groups' ? 'Task groups' : NAV.find((item) => item.id === page)?.title ?? 'Calendar'
 
-  function saveClass(value: ClassInput, id?: string) {
-    return perform(async () => {
-      const saved = await api.saveClass(value, id)
-
-      setClasses((current) => id
-        ? current.map((item) => item.id === id ? saved : item)
-        : [...current, saved])
-
-      setMessage('Class saved. Generate again to update planned tasks.')
-    })
-  }
-
-  function deleteClass(id: string) {
-    return perform(async () => {
-      await api.deleteClass(id)
-      setClasses((current) => current.filter((item) => item.id !== id))
-      setMessage('Class deleted. Generate again to update planned tasks.')
-    })
-  }
-
-  function generate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    void perform(async () => {
-      const result = await api.generateSchedule(weekStart)
-      setSchedule(result)
-      setMessage(
-        `${result.scheduled.length} scheduled; ${result.unscheduled.length} unscheduled.`,
-      )
-    })
-  }
-
-  const agenda = schedule ? [
-    ...schedule.commitments.map((item) => ({
-      key: `commitment-${item.id}`, kind: item.class_id ? 'Class' : 'Commitment',
-      title: item.title, start: item.start, end: item.end, detail: 'Fixed time',
-    })),
-    ...schedule.scheduled.map((item) => ({
-      key: `task-${item.task_id}`, kind: 'Task',
-      title: item.title, start: item.start, end: item.end,
-      detail: `${item.scheduled_minutes} minutes · based on your estimate`,
-    })),
-  ].sort((a, b) => Date.parse(a.start) - Date.parse(b.start)) : []
-
-  return (
-    <main>
-      <header className="page-header">
-        <div>
-          <span className="badge">Local demo</span>
-          <h1>Prioriti</h1>
-          <p>Save your work, add commitments, and plan the next seven days.</p>
-        </div>
-        <button type="button" className="secondary" onClick={reload} disabled={pending}>
-          Reload saved records
-        </button>
-      </header>
-
-      <nav className="page-nav" aria-label="Planner sections">
-        <a href="#calendar" aria-current={page === 'calendar' ? 'page' : undefined}>
-          Calendar
-        </a>
-        <a href="#tasks" aria-current={page === 'tasks' ? 'page' : undefined}>
-          Tasks
-        </a>
-        <a href="#classes" aria-current={page === 'classes' ? 'page' : undefined}>
-          Classes
-        </a>
-      </nav>
-
-      <div role="status" aria-live="polite">
-        {pending ? <p className="notice">Working…</p> : message && <p className="success">{message}</p>}
+  return <div className="app-shell">
+    {sidebarOpen && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} />}
+    <aside className={`app-sidebar ${sidebarOpen ? 'is-open' : ''}`}><a href="#calendar" className="brand" aria-label="Prioriti home"><span className="brand-symbol"><CalendarDays size={22} strokeWidth={2} /></span><span>prioriti<span className="brand-period">.</span></span></a>
+      <button className="create-button" type="button" aria-label="New task" disabled={disabled} onClick={() => createTask()}><Plus size={22} /><span>New task</span></button>
+      <nav className="primary-nav" aria-label="Planner sections">{NAV.map(({ id, title, icon: Icon }) => <a key={id} href={`#${id}`} aria-label={id === 'classes' ? 'Classes' : title} aria-current={page === id ? 'page' : undefined}><Icon size={18} /><span>{title}</span>{id === 'tasks' && <span className="nav-count">{tasks.filter((task) => task.status === 'todo').length}</span>}</a>)}</nav>
+      <MiniCalendar key={weekStart} value={weekStart} onChange={changeWeek} compact />
+      <div className="sidebar-group-heading"><span>MY GROUPS</span><a href="#groups" className="icon-button" aria-label="Manage task groups"><Plus size={16} /></a></div>
+      <div className="sidebar-groups"><button className={`group-filter ${!groupId ? 'active' : ''}`} onClick={() => setGroupId(null)}><Folder size={16} /><span>All groups</span><span className="group-count">{tasks.length}</span></button>{groups.map((group) => <button className={`group-filter ${groupId === group.id ? 'active' : ''}`} key={group.id} onClick={() => { setGroupId(groupId === group.id ? null : group.id); setSidebarOpen(false) }}><span className="color-dot" style={{ background: group.color }} /><span>{group.title}</span><span className="group-count">{tasks.filter((task) => task.group_id === group.id).length}</span></button>)}{!groups.length && <a className="create-group-link" href="#groups">Create your first group<ChevronRight size={13} /></a>}</div>
+      <div className="sidebar-bottom"><button className="learning-link" onClick={() => { window.location.hash = 'availability' }}><Sparkles size={17} /><span>{learning.samples ? `${learning.samples} learned preferences` : 'A little smarter with every plan'}</span></button><div className="workspace-status"><span className={`status-dot ${loaded ? '' : 'offline'}`} /><span>Saved on this computer</span></div></div>
+    </aside>
+    <main className="app-main"><header className="app-topbar"><div className="topbar-title"><button className="icon-button menu-button" aria-label="Open navigation" onClick={() => setSidebarOpen(true)}><Menu size={21} /></button><span>Workspace</span><ChevronRight size={13} /><strong>{currentLabel}</strong></div><div className="topbar-actions"><span className="today-label">{DateTime.fromISO(today()).toFormat('cccc, LLLL d')}</span><button className={`icon-button ${pending ? 'spinning' : ''}`} type="button" aria-label="Reload saved records" disabled={pending} onClick={() => { void perform(async () => {}, 'Everything is up to date.') }}><RefreshCw size={17} /></button><span className="workspace-avatar">P</span></div></header>
+      {pending && <div className="loading-line" aria-label="Loading saved records" role="status" />}
+      <div className={`page-content ${page === 'calendar' ? 'calendar-page' : ''}`}>
+        {page === 'calendar' && <CalendarPage weekStart={weekStart} schedule={schedule} tasks={tasks} groups={groups} groupId={groupId} disabled={disabled} onWeekChange={changeWeek} onGenerate={() => { void perform(() => api.generateSchedule(weekStart), 'Your week is planned. Adjust anything to make it yours.') }} onAccept={() => { void perform(() => api.acceptSchedule(weekStart), 'Plan kept. Your scheduling preferences have been updated.') }} onTask={openTask} onEvent={setSelectedEvent} onError={setError} onCreate={createTask} onMove={(block, placement) => { void perform(() => api.moveBlock(block.id, placement), 'Session moved. Preference saved for future plans.') }} />}
+        {page === 'tasks' && <TasksPage tasks={tasks} groups={groups} groupId={groupId} disabled={disabled} onOpen={openTask} onCreate={() => createTask()} onStatus={statusTask} />}
+        {page === 'groups' && <GroupsPage groups={groups} disabled={disabled} onSave={saveGroup} onDelete={deleteGroup} />}
+        {page === 'classes' && <div className="workspace-page classes-page"><div className="page-heading"><div><span className="eyebrow">THE FIXED POINTS IN YOUR WEEK</span><h1>Classes & Canvas</h1><p>Bring your class schedule and assignments together.</p></div></div><CanvasImport disabled={disabled} onImport={importCanvas} /><ClassesPage classes={classes} disabled={disabled} onSave={saveClass} onDelete={deleteClass} /></div>}
+        {page === 'availability' && loaded && <AvailabilityPage key={version} availability={availability} learning={learning} disabled={disabled} onSave={saveAvailability} onTrain={() => perform(() => api.trainLearning(), 'Your learned preferences are up to date.')} onDeleteTasks={deleteAllTasks} onClearLearning={clearLearning} />}
       </div>
-      {error && <p role="alert" className="error">{error}</p>}
-      {page === 'calendar' && (
-        <CalendarPage
-          key={`${weekStart}:${calendarVersion}`}
-          weekStart={weekStart}
-          schedule={schedule}
-          disabled={pending || !loaded}
-          onWeekChange={changeWeek}
-          onGenerate={generate}
-        />
-      )}
-
-      {page === 'classes' && (
-        <ClassesPage
-          classes={classes}
-          disabled={pending || !loaded}
-          onSave={saveClass}
-          onDelete={deleteClass}
-        />
-      )}
-      <div className="columns">
-        <section className="panel" hidden={page !== 'tasks'}>
-          <h2>Add a task</h2>
-          <form onSubmit={saveTask}>
-            <fieldset disabled={pending || !loaded}>
-              <label>Title<input name="title" required maxLength={200} /></label>
-              <label>Available from (optional)
-                <input
-                  name="not_before"
-                  type="datetime-local"
-                  aria-describedby="availability-help"
-                />
-              </label>
-              <p id="availability-help" className="hint">
-                Leave blank to let Prioriti start as soon as time is available. To keep work on a particular day, set both dates to that day.
-              </p>
-              <label>Deadline<input name="deadline" type="datetime-local" required /></label>
-              <div className="columns">
-                <label>Estimated minutes
-                  <input name="minutes" type="number" min="1" step="1" required />
-                </label>
-                <label>Priority
-                  <select name="priority" defaultValue="2">
-                    <option value="1">1 — Low</option>
-                    <option value="2">2 — Medium</option>
-                    <option value="3">3 — High</option>
-                  </select>
-                </label>
-              </div>
-              <label>Category
-                <input name="category" placeholder="Assignment, studying…" required maxLength={80} />
-              </label>
-              <label>Status
-                <select name="status" defaultValue="todo">
-                  <option value="todo">To do</option>
-                  <option value="completed">Completed</option>
-                </select>
-              </label>
-              <button type="submit">Save task</button>
-            </fieldset>
-          </form>
-        </section>
-
-        <section className="panel" hidden={page !== 'tasks'}>
-          <h2>Add a commitment</h2>
-          <p>Enter a one-off class, meeting, or other fixed block of time.</p>
-          <form onSubmit={saveCommitment}>
-            <fieldset disabled={pending || !loaded}>
-              <label>Title<input name="title" required maxLength={200} /></label>
-              <label>Start<input name="start" type="datetime-local" required /></label>
-              <label>End<input name="end" type="datetime-local" required /></label>
-              <button type="submit">Save commitment</button>
-            </fieldset>
-          </form>
-        </section>
-      </div>
-
-      <div className="columns">
-        <section className="panel" hidden={page !== 'tasks'}>
-          <h2>Saved tasks</h2>
-          {!loaded ? <p>Load saved records to continue.</p> : tasks.length === 0 ? <p>No tasks yet.</p> : (
-            <ul className="records">
-              {tasks.map((task) => (
-                <li key={task.id}>
-                  <strong>{task.title}</strong>
-                  <p>{task.estimated_minutes} min · Priority {task.priority} · {task.category} · {task.status}</p>
-                  <small>Due {formatDateTime(task.deadline)}</small>
-                  {task.not_before && (
-                    <p className="hint">
-                      Available from {formatDateTime(task.not_before)}
-                    </p>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-        <section className="panel" hidden={page !== 'tasks'}>
-          <h2>Saved commitments</h2>
-          {!loaded ? <p>Load saved records to continue.</p> : commitments.length === 0 ? <p>No commitments yet.</p> : (
-            <ul className="records">
-              {commitments.map((item) => (
-                <li key={item.id}>
-                  <strong>{item.title}</strong>
-                  <p>{formatDateTime(item.start)} → {formatDateTime(item.end)}</p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      </div>
-
-      <section className="panel" hidden={page !== 'tasks'}>
-        <h2>Plan seven days</h2>
-        <form onSubmit={generate}>
-          <fieldset disabled={pending || !loaded}>
-            <label>First day
-              <input
-                type="date"
-                required
-                min="1900-01-01"
-                max="9999-12-24"
-                value={weekStart}
-                onChange={(event) => changeWeek(event.target.value)}
-              />
-            </label>
-            <button type="submit">Generate schedule</button>
-          </fieldset>
-        </form>
-        <p className="hint">
-          Completed tasks are excluded. Each task uses one continuous block. The agenda is regenerated from saved records.
-        </p>
-
-        {!schedule ? <p>Generate a schedule to see your agenda.</p> : (
-          <>
-            <h3>Agenda</h3>
-            <p>Planning starts {formatDateTime(schedule.effective_start)}.</p>
-            {agenda.length === 0 ? <p>No blocks in this window.</p> : (
-              <ul className="records">
-                {agenda.map((item) => (
-                  <li key={item.key}>
-                    <span className="badge">{item.kind}</span>
-                    <strong>{item.title}</strong>
-                    <p>{formatDateTime(item.start)} → {formatDateTime(item.end)}</p>
-                    <small>{item.detail}</small>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <h3>Unscheduled tasks</h3>
-            {schedule.unscheduled.length === 0 ? <p>No unscheduled tasks.</p> : (
-              <ul className="records">
-                {schedule.unscheduled.map((item) => (
-                  <li key={item.task_id}>
-                    <strong>{item.title}</strong>
-                    <p>{item.reason}</p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </>
-        )}
-      </section>
     </main>
-  )
+    {message && !error && <div className="toast success-toast" role="status"><Check size={17} />{message}</div>}
+    {error && <div className="toast error-toast" role="alert"><span>{error}</span><button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}><X size={16} /></button></div>}
+    {editor && (!editor.id || editTask) && <TaskPanel key={`${editor.id ?? 'new'}:${editor.blockId ?? ''}`} task={editTask ?? null} groups={groups} block={editBlock} initialPlacement={editor.placement} initialGroup={groupId} disabled={disabled} onSave={saveTask} onDelete={deleteTask} onStatus={statusTask} onComplete={completeBlock} onClose={() => setEditor(null)} />}
+    {selectedEvent && <EventPanel key={selectedEvent.id} event={selectedEvent} disabled={disabled} onSave={saveEvent} onDelete={deleteEvent} onClose={closeEvent} />}
+  </div>
 }

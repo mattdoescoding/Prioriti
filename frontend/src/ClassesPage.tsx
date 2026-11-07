@@ -63,7 +63,7 @@ export default function ClassesPage({
         </h2>
 
         <p>
-          Repeat on selected weekdays during the term. All times use New York time.
+          Repeat on selected weekdays during the term.
         </p>
 
         <form

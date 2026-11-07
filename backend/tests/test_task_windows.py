@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from pydantic import ValidationError
 
-from app.models import CommitmentRead, TaskRead
+from app.models import CalendarEvent, TaskRead
 from app.scheduler import generate_schedule
 
 NY = ZoneInfo("America/New_York")
@@ -41,7 +41,7 @@ def test_thursday_task_cannot_be_scheduled_on_monday():
 
 def test_full_thursday_does_not_move_task_to_another_day():
     item = task(not_before=datetime(2026, 11, 5, 9, tzinfo=NY))
-    busy = CommitmentRead(
+    busy = CalendarEvent(
         id="busy",
         owner_id="local-development",
         title="Unavailable",
